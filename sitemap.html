@@ -1,0 +1,241 @@
+<div id="sitemapContainer">
+  <div id="sitemapFilter"></div>
+  <div id="sitemapPosts">...</div>
+</div>
+
+<script id="sitemapXML" src="/feeds/posts/summary?callback=onSitemapLoad&alt=json-in-script&max-results=9999" async></script>
+
+<!-- Get posts with LABEL1 and LABEL2 -->
+<!--script id="sitemapXML" src="/feeds/posts/summary/-/LABEL1/LABEL2?callback=onSitemapLoad&alt=json-in-script&max-results=9999" async></script-->
+
+<script>/*<![CDATA[*/
+  const ALL = '__all__';
+  const getPostsCont = function() { return document.getElementById('sitemapPosts'); }
+  const getFilterCont = function() { return document.getElementById('sitemapFilter'); }
+  
+  function onSitemapLoad(json) {
+    initWithFilter();
+    // initWithoutFilter();
+    
+    // --------------------------------------
+    function initWithFilter() { init(true) }
+    function initWithoutFilter() { init(false) }
+    
+    function init(withFilter) {
+      const {posts, postCountByCat} = getPosts(json);
+      renderPosts(posts);
+      if (!withFilter) return;
+      
+      const cats = getCats(json);
+      const filterObj = renderFilter(cats, postCountByCat);
+      filterObj.onFilterChange = function(activeCats) {
+        const {posts, postCountByCat} = getPosts(json, activeCats);
+        renderPosts(posts);
+        filterObj.updatePostCount(postCountByCat);
+      }
+    }
+    
+    // --------------------------------------
+    function getCats(json) {
+      if (!json || !json.feed || !json.feed.category) return [];
+      const res = [ALL]
+      const arr = json.feed.category;
+      for (let i = 0; i < arr.length; i++) {
+        if (!arr[i] || !arr[i].term) continue;
+        res.push(arr[i].term);
+      }
+      return res;
+    }
+
+    function getPosts(json, activeCats) {
+      const resObj = {posts: [], postCountByCat: {}}
+      if ((activeCats && activeCats.size === 0) || !json || !json.feed || !json.feed.entry) return resObj;
+      const arr = json.feed.entry;
+      for (let i = 0; i < arr.length; i++) {
+        const item = arr[i] || {};
+        const cats = (item.category || []).map(function (val) { return val.term; });
+        
+        // filter
+        if (activeCats && !cats.some( function (cat) { return activeCats.has(cat); })) continue;
+        
+        const obj = {
+          cats: cats,
+          thumb: item['media$thumbnail'].url,
+          summary: (item.summary || {}).$t,
+          title: (item.title || {}).$t,
+          link: (item.link || []).find(function(val) { return val.rel === 'alternate' }),
+        };
+        obj.cats.forEach(function (catName) {
+          resObj.postCountByCat[catName] = (resObj.postCountByCat[catName] || 0) + 1;
+        });
+        if (obj.title) resObj.posts.push(obj);
+      }
+      resObj.postCountByCat[ALL] = resObj.posts.length;
+      return resObj;
+    }
+    
+    // --------------------------------------
+    function renderFilter(cats, postCountByCat) {
+      const root = document.createElement('fieldset');
+      root.classList.add('filterInner');
+      for (let i = 0; i < cats.length; i++) {
+        if (!cats[i]) continue;
+        const title = cats[i];
+        const id = 'sitemapfilter' + i;
+        
+        const cont = document.createElement('span');
+        cont.classList.add('label');
+        
+        const input = document.createElement('input');
+        input.setAttribute('type', 'checkbox');
+        input.setAttribute('id', id);
+        input.setAttribute('name', title);
+        input.toggleAttribute('checked');
+        cont.appendChild(input);
+        
+        const label = document.createElement('label');
+        label.setAttribute('for', id);
+        cont.appendChild(label);
+        
+        const titleEl = document.createElement('span');
+        titleEl.classList.add('labelTitle');
+        titleEl.appendChild(document.createTextNode(title === ALL ? 'All' : title));
+        label.appendChild(titleEl);
+        
+        const countEl = document.createElement('span');
+        countEl.classList.add('postCount');
+        countEl.appendChild(document.createTextNode(postCountByCat[title] || 0));
+        label.appendChild(countEl);
+        
+        root.appendChild(cont);
+      }
+      
+      getFilterCont().replaceChildren(root);
+      
+      const filterCatElems = getFilterCont().querySelectorAll('input');
+      const filterCatElemAll = filterCatElems[0];
+      
+      const res = {
+        updatePostCount: function (postCountByCat) {
+          for (const catElem of filterCatElems) {
+            catElem.parentElement.querySelector('.postCount').textContent = postCountByCat[catElem.name] || 0;
+          }
+        },
+        onFilterChange: function (activeCats) {},
+      };
+      
+      for (const catElem of filterCatElems) {
+        catElem.addEventListener('click', onFilterChange);
+      }
+      
+      function onFilterChange(e) {
+        if (e.target === filterCatElemAll) {
+          for (const catElem of filterCatElems) {
+            catElem.checked = filterCatElemAll.checked;
+          }
+        }
+
+        const filterCats = new Set()
+        for (const catElem of filterCatElems) {
+          if (catElem.checked && catElem !== filterCatElemAll) {
+            filterCats.add(catElem.name);
+          }
+        }
+
+        if (filterCats.size === filterCatElems.length - 1) {
+          filterCatElemAll.checked = true;
+        } else if (filterCats.size === 0) {
+          filterCatElemAll.checked = false;
+        }
+        
+        res.onFilterChange(filterCats);
+      }
+      
+      return res;
+    }
+
+    function renderPosts(posts) {
+      const container = getPostsCont();
+      const root = document.createElement('ul');
+      for (let i = 0; i < posts.length; i++) {
+        const cont = document.createElement('li');
+        
+        const a = document.createElement('a');
+        a.appendChild(document.createTextNode(posts[i].title));
+        a.setAttribute('href', posts[i].link.href);
+        a.setAttribute('title', posts[i].title);
+        cont.appendChild(a);
+        
+        const cats = document.createElement('div');
+        cats.setAttribute('id', 'categories');
+        posts[i].cats.forEach(function (val) {
+          const label = document.createElement('span');
+          label.classList.add('cat', 'label');
+          label.appendChild(document.createTextNode(val));
+          cats.appendChild(label);
+        })
+        cont.appendChild(cats);
+        
+        root.appendChild(cont);
+      }
+      container.replaceChildren(root);
+    }
+  }
+/*]]>*/</script>
+
+<style>
+  #sitemapContainer .filterInner {
+    padding-bottom: 16px;
+  }
+  #sitemapContainer .filterInner .label > * {
+    margin-right: 3px;
+    margin-left: 3px;
+  }
+  #sitemapContainer .filterInner .label {
+    margin-right: 7px;
+  }
+  #sitemapContainer .filterInner .postCount {
+    font-size: 0.67em;
+    background-color: #fff;
+    color: black;
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+  .dark #sitemapContainer .filterInner .postCount {
+    background-color: #999;
+  }
+  #sitemapContainer .filterInner .labelTitle {
+    font-size: 0.9em;
+    margin-right: 6px;
+  }
+  #sitemapContainer .cat {
+    font-size: 0.6em;
+    line-height: 1.4em;
+  }
+  #sitemapContainer .label {
+    display: inline-block;
+    padding: 4px 10px;
+    margin-right: 4px;
+    margin-bottom: 6px;
+    background-color: #efefef;
+    color: #333;
+    border-radius: 12px;
+  }
+  .dark #sitemapContainer .label {
+  	background-color: #3A3A3A;
+    color: #ccc;
+  }
+  #sitemapContainer .filterInner input[type="checkbox"] {
+    appearance: auto;
+  }
+  #sitemapContainer .filterInner input[type="checkbox"],
+  #sitemapContainer .filterInner input[type="checkbox"]+label{
+  	cursor: pointer;
+    -webkit-touch-callout: none; /* iOS Safari */
+    -webkit-user-select: none; /* Safari */
+     -khtml-user-select: none; /* Konqueror HTML */
+       -moz-user-select: none; /* Old versions of Firefox */
+        -ms-user-select: none; /* Internet Explorer/Edge */
+            user-select: none;
+  }
+</style>
